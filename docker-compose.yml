@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: caja
+      DB_USERNAME: caja
+      DB_PASSWORD: secret
+    volumes:
+      - .:/var/www
+      - /var/www/vendor   # conserva las dependencias instaladas en la imagen
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: caja
+      POSTGRES_USER: caja
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U caja -d caja"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
