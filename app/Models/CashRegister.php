@@ -10,6 +10,11 @@ class CashRegister extends Model
 {
     protected $guarded = [];
 
+    protected function casts(): array
+    {
+        return ['default_float' => 'decimal:2'];
+    }
+
     public function sessions(): HasMany
     {
         return $this->hasMany(CashSession::class);

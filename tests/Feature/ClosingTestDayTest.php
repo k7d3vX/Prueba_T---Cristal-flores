@@ -38,6 +38,10 @@ class ClosingTestDayTest extends TestCase
         $this->assertSame('2250.00', $session->expected_cash);
         $this->assertSame('2180.00', $session->counted_cash);
         $this->assertSame('-70.00', $session->difference);
+
+        // conteo por denominaciones (Fase 3): suma exactamente lo contado
+        $this->assertSame(['b200' => 4, 'b100' => 7, 'b50' => 12, 'b20' => 4], $session->count_breakdown);
+        $this->assertSame(218000, \App\Support\Denominations::totalCents($session->count_breakdown));
     }
 
     public function test_closing_of_the_test_day_is_a_shortage_of_70_not_1170(): void
@@ -63,7 +67,7 @@ class ClosingTestDayTest extends TestCase
         $owner = User::where('email', 'owner@tienda.test')->firstOrFail();
 
         $this->actingAs($owner)
-            ->get(route('cash.summary', CashSession::sole()))
+            ->get(route('owner.sessions.show', CashSession::sole()))
             ->assertOk()
             ->assertSee('Faltante de Bs 70,00')
             ->assertSee('Bs 3.050,00')   // total vendido
@@ -79,11 +83,27 @@ class ClosingTestDayTest extends TestCase
         $owner = User::where('email', 'owner@tienda.test')->firstOrFail();
 
         $this->actingAs($owner)
-            ->get(route('cash.summary', CashSession::sole()))
+            ->get(route('owner.sessions.show', CashSession::sole()))
             ->assertOk()
             ->assertSee('Vendí Bs 3.050, más los Bs 300 de cambio son Bs 3.350, y el cajero contó Bs 2.180. ¡Me faltan Bs 1.170!')
             ->assertSeeInOrder(['Se ganó', 'Bs 3.050,00', 'Se inició con', 'Bs 300,00', 'En total', 'Bs 3.350,00'])
             ->assertSeeInOrder(['Turno de', '08:00', 'a', '20:00', 'Tiempo trabajado', '12 hr 0 min']);
+    }
+
+    /** AC-21: la auditoría del cierre muestra todo lo que la dueña necesita para decidir. */
+    public function test_the_audit_screen_shows_verdict_bars_reconciliation_and_timeline(): void
+    {
+        $owner = User::where('email', 'owner@tienda.test')->firstOrFail();
+
+        $this->actingAs($owner)->get(route('owner.sessions.show', CashSession::sole()))
+            ->assertOk()
+            ->assertSee('Faltante de Bs 70,00')
+            ->assertSee('Efectivo Bs 2.150,00 (70 %)')
+            ->assertSee('QR Bs 900,00 (30 %)')
+            ->assertSee('Línea de tiempo')
+            ->assertSee('Pago al proveedor de aceite')
+            ->assertSee('Pendiente de revisión')
+            ->assertSee('Marcar como revisado');
     }
 
     public function test_seeder_is_idempotent(): void

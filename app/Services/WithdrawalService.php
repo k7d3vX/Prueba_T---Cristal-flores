@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Enums\WithdrawalCategory;
 use App\Exceptions\InsufficientCashException;
 use App\Models\CashSession;
 use App\Models\Withdrawal;
@@ -20,6 +21,7 @@ class WithdrawalService
         private WithdrawalRepositoryInterface $withdrawals,
         private CashSessionRepositoryInterface $sessions,
         private CashClosingService $closing,
+        private AuditLogger $audit,
     ) {}
 
     /**
@@ -28,7 +30,7 @@ class WithdrawalService
      * - No puede superar el efectivo que hay en la caja: fondo + ventas en efectivo − salidas previas (RN-12).
      *   La fila de la sesión se bloquea para que dos salidas simultáneas no se pasen del efectivo.
      */
-    public function register(CashSession $session, string $amount, string $reason, ?CarbonInterface $at = null): Withdrawal
+    public function register(CashSession $session, string $amount, string $reason, ?CarbonInterface $at = null, WithdrawalCategory $category = WithdrawalCategory::Other): Withdrawal
     {
         $cents = Money::toCents($amount);
 
@@ -36,11 +38,11 @@ class WithdrawalService
             throw new DomainException('El monto debe ser mayor que cero.');
         }
 
-        return DB::transaction(function () use ($session, $amount, $reason, $at, $cents) {
+        return DB::transaction(function () use ($session, $amount, $reason, $at, $cents, $category) {
             $locked = $this->sessions->lockForUpdate($session->id);
 
             if (! $locked->isOpen()) { // RN-7 / AC-03
-                throw new DomainException('La caja está cerrada: no se pueden registrar salidas.');
+                throw new DomainException('El turno no está abierto: no se pueden registrar salidas.');
             }
 
             $available = $this->closing->summary($locked)->expectedCash; // efectivo hoy en la caja
@@ -49,7 +51,10 @@ class WithdrawalService
                 throw new InsufficientCashException($available);
             }
 
-            return $this->withdrawals->create($locked, $amount, $reason, $at);
+            $withdrawal = $this->withdrawals->create($locked, $amount, $reason, $at, $category);
+            $this->audit->record('salida', 'Salida '.Money::format($cents).' · '.$category->label().' · '.$reason, $locked);
+
+            return $withdrawal;
         });
     }
 }

@@ -2,8 +2,8 @@
 
 namespace Database\Seeders;
 
-use App\Enums\ClosingMode;
 use App\Enums\PaymentMethod;
+use App\Enums\WithdrawalCategory;
 use App\Repositories\Contracts\CashRegisterRepositoryInterface;
 use App\Repositories\Contracts\CashSessionRepositoryInterface;
 use App\Repositories\Contracts\UserRepositoryInterface;
@@ -11,6 +11,8 @@ use App\Services\CashClosingService;
 use App\Services\CashSessionService;
 use App\Services\SaleService;
 use App\Services\WithdrawalService;
+use App\Support\Denominations;
+use App\Support\Money;
 use Illuminate\Database\Seeder;
 
 /**
@@ -38,7 +40,8 @@ class TestDaySeeder extends Seeder
         $cashier = $users->findByEmailOrFail('cajero@tienda.test');
         $day = now()->startOfDay();
 
-        $session = $cash->open($cashier, $cashier->id, $registers->all()->firstOrFail()->id, '300.00', ClosingMode::Blind, $day->copy()->setTime(8, 0));
+        // El cajero abre la caja con el fondo habitual (Bs 300), siempre en caja ciega (RN-15).
+        $session = $cash->openByCashier($cashier, $registers->all()->firstOrFail()->id, $day->copy()->setTime(8, 0));
 
         $movements = [
             ['450.00', PaymentMethod::Cash, 9, 30],
@@ -52,8 +55,10 @@ class TestDaySeeder extends Seeder
             $sales->register($session, $amount, $method, $day->copy()->setTime($hour, $minute));
         }
 
-        $withdrawals->register($session, '200.00', 'Pago al proveedor de aceite', $day->copy()->setTime(15, 0));
+        $withdrawals->register($session, '200.00', 'Pago al proveedor de aceite', $day->copy()->setTime(15, 0), WithdrawalCategory::Supplier);
 
-        $closing->close($session, '2180.00', $cashier, $day->copy()->setTime(20, 0));
+        // El cajero cuenta por billetes: 4×200 + 7×100 + 12×50 + 4×20 = 2.180
+        $counts = ['b200' => 4, 'b100' => 7, 'b50' => 12, 'b20' => 4];
+        $closing->close($session, Money::fromCents(Denominations::totalCents($counts)), $cashier, $day->copy()->setTime(20, 0), $counts);
     }
 }

@@ -2,11 +2,13 @@
 
 namespace App\Providers;
 
+use App\Repositories\Contracts\AuditLogRepositoryInterface;
 use App\Repositories\Contracts\CashRegisterRepositoryInterface;
 use App\Repositories\Contracts\CashSessionRepositoryInterface;
 use App\Repositories\Contracts\SaleRepositoryInterface;
 use App\Repositories\Contracts\UserRepositoryInterface;
 use App\Repositories\Contracts\WithdrawalRepositoryInterface;
+use App\Repositories\Eloquent\EloquentAuditLogRepository;
 use App\Repositories\Eloquent\EloquentCashRegisterRepository;
 use App\Repositories\Eloquent\EloquentCashSessionRepository;
 use App\Repositories\Eloquent\EloquentSaleRepository;
@@ -24,11 +26,15 @@ class AppServiceProvider extends ServiceProvider
         SaleRepositoryInterface::class => EloquentSaleRepository::class,
         WithdrawalRepositoryInterface::class => EloquentWithdrawalRepository::class,
         UserRepositoryInterface::class => EloquentUserRepository::class,
+        AuditLogRepositoryInterface::class => EloquentAuditLogRepository::class,
     ];
 
     public function boot(): void
     {
         // {cashSession} en las rutas se resuelve por el repositorio, no con Eloquent directo.
         Route::bind('cashSession', fn (string $id) => app(CashSessionRepositoryInterface::class)->findOrFail($id));
+        Route::bind('sale', fn (string $id) => app(SaleRepositoryInterface::class)->findOrFail($id));
+        Route::bind('withdrawal', fn (string $id) => app(WithdrawalRepositoryInterface::class)->findOrFail($id));
+        Route::bind('cashRegister', fn (string $id) => app(CashRegisterRepositoryInterface::class)->findOrFail($id));
     }
 }

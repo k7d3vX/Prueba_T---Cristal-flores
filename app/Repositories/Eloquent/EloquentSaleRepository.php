@@ -26,4 +26,31 @@ class EloquentSaleRepository implements SaleRepositoryInterface
     {
         return $session->sales()->orderBy('id', $newestFirst ? 'desc' : 'asc')->get();
     }
+
+    public function recentForSession(CashSession $session, int $limit): Collection
+    {
+        return $session->sales()->whereNull('voided_at')->orderByDesc('id')->limit($limit)->get();
+    }
+
+    public function findOrFail(int|string $id): Sale
+    {
+        return Sale::query()->with('cashSession')->findOrFail($id);
+    }
+
+    public function update(Sale $movement, array $attributes): Sale
+    {
+        $movement->update($attributes);
+
+        return $movement;
+    }
+
+    public function pendingVoidRequests(): Collection
+    {
+        return Sale::query()
+            ->with(['cashSession.cashRegister', 'cashSession.cashier'])
+            ->whereNotNull('void_requested_at')
+            ->whereNull('voided_at')
+            ->orderBy('void_requested_at')
+            ->get();
+    }
 }

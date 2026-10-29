@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ClosingMode;
+use App\Enums\ReviewStatus;
 use App\Enums\SessionStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,6 +24,11 @@ class CashSession extends Model
             'status' => SessionStatus::class,
             'opened_at' => 'datetime',
             'closed_at' => 'datetime',
+            'float_confirmed_at' => 'datetime',
+            'float_disputed_at' => 'datetime',
+            'review_status' => ReviewStatus::class,
+            'count_breakdown' => 'array',
+            'reviewed_at' => 'datetime',
         ];
     }
 
@@ -46,6 +52,16 @@ class CashSession extends Model
         return $this->belongsTo(User::class, 'closed_by');
     }
 
+    public function reviewedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    public function isClosed(): bool
+    {
+        return $this->status === SessionStatus::Closed;
+    }
+
     public function sales(): HasMany
     {
         return $this->hasMany(Sale::class);
@@ -66,9 +82,16 @@ class CashSession extends Model
         return max(0, $this->closed_at->getTimestamp() - $this->opened_at->getTimestamp());
     }
 
+    /** Abierto = el cajero ya confirmó el fondo: solo entonces admite ventas, salidas y cierre. */
     public function isOpen(): bool
     {
         return $this->status === SessionStatus::Open;
+    }
+
+    /** La dueña lo abrió y el cajero aún no confirmó el fondo recibido. */
+    public function isPending(): bool
+    {
+        return $this->status === SessionStatus::PendingConfirmation;
     }
 
     public function isBlind(): bool

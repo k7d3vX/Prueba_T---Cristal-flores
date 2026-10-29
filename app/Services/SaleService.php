@@ -14,7 +14,7 @@ use DomainException;
 
 class SaleService
 {
-    public function __construct(private SaleRepositoryInterface $sales) {}
+    public function __construct(private SaleRepositoryInterface $sales, private AuditLogger $audit) {}
 
     /** RF-2: registra una venta en una caja abierta (RN-7 / AC-03). */
     public function register(CashSession $session, string $amount, PaymentMethod $method, ?CarbonInterface $at = null): Sale
@@ -24,9 +24,12 @@ class SaleService
         }
 
         if (! $session->isOpen()) {
-            throw new DomainException('La caja está cerrada: no se pueden registrar ventas.');
+            throw new DomainException('El turno no está abierto: no se pueden registrar ventas.');
         }
 
-        return $this->sales->create($session, $amount, $method, $at);
+        $sale = $this->sales->create($session, $amount, $method, $at);
+        $this->audit->record('venta', 'Venta '.mb_strtolower($method->label() === 'QR' ? 'QR' : 'en efectivo').' '.Money::format(Money::toCents($amount)), $session);
+
+        return $sale;
     }
 }

@@ -1,4 +1,4 @@
-@extends('layouts.app')
+@extends('layouts.base')
 @section('title', 'Ingresar')
 @section('content')
     <article style="max-width:28rem;margin:3rem auto">

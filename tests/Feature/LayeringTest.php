@@ -19,6 +19,8 @@ use App\Repositories\Eloquent\EloquentCashSessionRepository;
 use App\Repositories\Eloquent\EloquentSaleRepository;
 use App\Repositories\Eloquent\EloquentUserRepository;
 use App\Repositories\Eloquent\EloquentWithdrawalRepository;
+use App\Services\AuditLogger;
+use App\Services\CashClosingService;
 use App\Services\CashSessionService;
 use App\Services\SaleService;
 use App\Services\WithdrawalService;
@@ -45,42 +47,42 @@ class LayeringTest extends TestCase
         $this->assertInstanceOf(EloquentSaleRepository::class, app(SaleRepositoryInterface::class));
         $this->assertInstanceOf(EloquentWithdrawalRepository::class, app(WithdrawalRepositoryInterface::class));
         $this->assertInstanceOf(EloquentUserRepository::class, app(UserRepositoryInterface::class));
+        $this->assertInstanceOf(\App\Repositories\Eloquent\EloquentAuditLogRepository::class, app(\App\Repositories\Contracts\AuditLogRepositoryInterface::class));
     }
 
-    public function test_service_hides_totals_from_a_blind_cashier_but_not_from_the_owner(): void
+    public function test_cashier_shift_exposes_no_totals_and_only_the_last_records(): void
     {
         $owner = User::factory()->owner()->create();
         $cashier = User::factory()->cashier()->create();
         $cash = app(CashSessionService::class);
 
-        $session = $cash->open($owner, $cashier->id, $this->register()->id, '300.00', ClosingMode::Blind);
+        $session = $cash->openForCashier($owner, $cashier->id, $this->register()->id, '300.00', ClosingMode::Blind);
+        $this->assertSame('pending', $cash->shiftFor($cashier)->state);
+
+        $session = $cash->confirmFloat($session, $cashier);
         app(SaleService::class)->register($session, '450.00', PaymentMethod::Cash);
         app(WithdrawalService::class)->register($session, '50.00', 'Proveedor');
 
-        $forCashier = $cash->details($session, $cashier);
-        $this->assertFalse($forCashier->showTotals);
-        $this->assertNull($forCashier->summary);
-        $this->assertCount(0, $forCashier->sales);
-        $this->assertTrue($forCashier->canClose);
+        $shift = $cash->shiftFor($cashier);
+        $this->assertSame('open', $shift->state);
+        $this->assertCount(2, $shift->recent);
+        $this->assertTrue($shift->canClose);
+        $this->assertFalse(property_exists($shift, 'summary'));
 
-        $forOwner = $cash->details($session, $owner);
-        $this->assertTrue($forOwner->showTotals);
-        $this->assertSame(70000, $forOwner->summary->expectedCash); // 300 + 450 − 50
-        $this->assertCount(1, $forOwner->sales);
-        $this->assertFalse($forOwner->canClose); // en caja ciega no cierra la dueña
+        // la dueña sí obtiene el resumen, por el servicio de cierre
+        $this->assertSame(70000, app(CashClosingService::class)->summary($session)->expectedCash); // 300 + 450 − 50
     }
 
     public function test_opening_a_second_session_throws_a_domain_exception(): void
     {
         $owner = User::factory()->owner()->create();
-        $cashier = User::factory()->cashier()->create();
         $cash = app(CashSessionService::class);
 
         $register = $this->register();
-        $cash->open($owner, $cashier->id, $register->id, '300.00', ClosingMode::Normal);
+        $cash->openForCashier($owner, User::factory()->cashier()->create()->id, $register->id, '300.00', ClosingMode::Normal);
 
         $this->expectException(DomainException::class);
-        $cash->open($owner, $cashier->id, $register->id, '300.00', ClosingMode::Normal);
+        $cash->openForCashier($owner, User::factory()->cashier()->create()->id, $register->id, '300.00', ClosingMode::Normal);
     }
 
     /** Ventaja de la interfaz: el servicio se prueba con un repositorio falso, sin tocar la BD. */
@@ -101,8 +103,28 @@ class LayeringTest extends TestCase
             {
                 return collect();
             }
+
+            public function recentForSession(CashSession $session, int $limit): Collection
+            {
+                return collect();
+            }
+
+            public function findOrFail(int|string $id): Sale
+            {
+                return new Sale;
+            }
+
+            public function update(Sale $movement, array $attributes): Sale
+            {
+                return $movement;
+            }
+
+            public function pendingVoidRequests(): Collection
+            {
+                return collect();
+            }
         };
-        $service = new SaleService($fake);
+        $service = new SaleService($fake, app(AuditLogger::class));
 
         $service->register(new CashSession(['status' => SessionStatus::Open]), '450.00', PaymentMethod::Cash);
         $this->assertSame([['450.00', PaymentMethod::Cash]], $fake->created);

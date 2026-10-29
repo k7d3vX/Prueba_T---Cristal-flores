@@ -7,10 +7,11 @@ use App\Enums\SessionStatus;
 use App\Models\CashRegister;
 use App\Models\CashSession;
 use App\Models\User;
+use App\Services\CashClosingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-/** AC-05, AC-06, AC-08: caja ciega vs caja normal. */
+/** AC-05, AC-06, AC-08: caja ciega vs caja normal (quién cierra y qué ve cada rol). */
 class BlindModeTest extends TestCase
 {
     use RefreshDatabase;
@@ -31,7 +32,7 @@ class BlindModeTest extends TestCase
         $session = CashSession::create([
             'cash_register_id' => CashRegister::firstOrCreate(['name' => 'Caja Principal'])->id,
             'cashier_id' => $this->cashier->id,
-            'opened_by' => $this->cashier->id,
+            'opened_by' => $this->owner->id,
             'opening_float' => '300.00',
             'closing_mode' => $mode,
             'status' => SessionStatus::Open,
@@ -47,15 +48,14 @@ class BlindModeTest extends TestCase
 
     public function test_blind_cashier_never_sees_expected_cash_or_totals(): void
     {
-        $session = $this->sessionWithMovements(ClosingMode::Blind);
+        $this->sessionWithMovements(ClosingMode::Blind);
 
-        foreach ([route('cash.show', $session), route('cash.close', $session)] as $url) {
+        foreach ([route('cashier.home'), route('cashier.close')] as $url) {
             $this->actingAs($this->cashier)->get($url)
                 ->assertOk()
                 ->assertDontSee('Esperado')
                 ->assertDontSee('Bs 1.750,00')  // esperado
                 ->assertDontSee('Bs 1.650,00')  // ventas en efectivo
-                ->assertDontSee('Bs 600,00')    // QR
                 ->assertDontSee('Diferencia');
         }
     }
@@ -65,12 +65,12 @@ class BlindModeTest extends TestCase
         $session = $this->sessionWithMovements(ClosingMode::Blind);
 
         $this->actingAs($this->cashier)
-            ->post(route('cash.close.store', $session), ['counted_cash' => '1700'])
-            ->assertRedirect(route('cash.show', $session));
+            ->post(route('cashier.close.store'), ['counted_cash' => '1700'])
+            ->assertRedirect(route('cashier.home'));
 
-        $this->actingAs($this->cashier)->get(route('cash.show', $session))
+        $this->actingAs($this->cashier)->get(route('cashier.home'))
             ->assertOk()
-            ->assertSee('Cierre registrado')
+            ->assertSee('Cierre enviado')
             ->assertDontSee('Bs 1.750,00')
             ->assertDontSee('Bs -50,00')
             ->assertDontSee('Faltante');
@@ -84,10 +84,10 @@ class BlindModeTest extends TestCase
     public function test_cashier_cannot_open_the_summary(): void
     {
         $session = $this->sessionWithMovements(ClosingMode::Blind);
-        app(\App\Services\CashClosingService::class)->close($session, '1700', $this->cashier);
+        app(CashClosingService::class)->close($session, '1700', $this->cashier);
 
-        $this->actingAs($this->cashier)->get(route('cash.summary', $session))->assertForbidden();
-        $this->actingAs($this->owner)->get(route('cash.summary', $session))
+        $this->actingAs($this->cashier)->get(route('owner.sessions.show', $session))->assertForbidden();
+        $this->actingAs($this->owner)->get(route('owner.sessions.show', $session))
             ->assertOk()
             ->assertSee('Faltante de Bs 50,00');
     }
@@ -96,9 +96,9 @@ class BlindModeTest extends TestCase
     {
         $session = $this->sessionWithMovements(ClosingMode::Blind);
 
-        $this->actingAs($this->owner)->get(route('cash.close', $session))->assertForbidden();
+        $this->actingAs($this->owner)->get(route('owner.close', $session))->assertForbidden();
         $this->actingAs($this->owner)
-            ->post(route('cash.close.store', $session), ['counted_cash' => '1750'])
+            ->post(route('owner.close.store', $session), ['counted_cash' => '1750'])
             ->assertForbidden();
         $this->assertTrue($session->fresh()->isOpen());
     }
@@ -107,32 +107,33 @@ class BlindModeTest extends TestCase
     {
         $session = $this->sessionWithMovements(ClosingMode::Normal);
 
-        $this->actingAs($this->cashier)->get(route('cash.close', $session))->assertForbidden();
+        $this->actingAs($this->cashier)->get(route('cashier.close'))->assertForbidden();
         $this->actingAs($this->cashier)
-            ->post(route('cash.close.store', $session), ['counted_cash' => '1750'])
+            ->post(route('cashier.close.store'), ['counted_cash' => '1750'])
             ->assertForbidden();
+        $this->assertTrue($session->fresh()->isOpen());
     }
 
     public function test_owner_closes_a_normal_session_seeing_the_expected_cash(): void
     {
         $session = $this->sessionWithMovements(ClosingMode::Normal);
 
-        $this->actingAs($this->owner)->get(route('cash.close', $session))
+        $this->actingAs($this->owner)->get(route('owner.close', $session))
             ->assertOk()
             ->assertSee('Esperado en caja')
             ->assertSee('Bs 1.750,00');
 
         $this->actingAs($this->owner)
-            ->post(route('cash.close.store', $session), ['counted_cash' => '1750'])
-            ->assertRedirect(route('cash.summary', $session));
+            ->post(route('owner.close.store', $session), ['counted_cash' => '1750'])
+            ->assertRedirect(route('owner.sessions.show', $session));
 
-        $this->actingAs($this->owner)->get(route('cash.summary', $session))
+        $this->actingAs($this->owner)->get(route('owner.sessions.show', $session))
             ->assertOk()
             ->assertSee('La caja cuadra');
         $this->assertSame('0.00', $session->fresh()->difference);
     }
 
-    /** Riesgo 1: ninguna pantalla del cajero (caja ciega) revela cifras del cierre, ni siquiera ya cerrada. */
+    /** Riesgo 1: ninguna pantalla del cajero revela cifras del cierre, ni siquiera ya cerrada. */
     public function test_blind_cashier_gets_no_figures_in_any_page_of_the_closed_test_day(): void
     {
         $this->seed(); // día de prueba: caja ciega cerrada, esperado 2.250, faltante 70
@@ -142,15 +143,13 @@ class BlindModeTest extends TestCase
         $forbidden = ['Bs 2.250,00', 'Bs 3.050,00', 'Bs 2.150,00', 'Bs 900,00', 'Bs -70,00', 'Bs 70,00',
             'Bs 200,00', 'Faltante', 'Esperado', 'Diferencia'];
 
-        foreach ([route('cash.index'), route('cash.show', $session)] as $url) {
-            $response = $this->actingAs($cashier)->get($url)->assertOk();
-            foreach ($forbidden as $text) {
-                $response->assertDontSee($text);
-            }
+        $response = $this->actingAs($cashier)->get(route('cashier.home'))->assertOk()->assertSee('Cierre enviado');
+        foreach ($forbidden as $text) {
+            $response->assertDontSee($text);
         }
 
-        $this->actingAs($cashier)->get(route('cash.close', $session))->assertRedirect(route('cash.show', $session));
-        $this->actingAs($cashier)->get(route('cash.summary', $session))->assertForbidden();
+        $this->actingAs($cashier)->get(route('cashier.close'))->assertRedirect(route('cashier.home'));
+        $this->actingAs($cashier)->get(route('owner.sessions.show', $session))->assertForbidden();
     }
 
     /** Riesgo 1, defensa en profundidad: ni siquiera llegan los datos a la vista. */
@@ -159,13 +158,10 @@ class BlindModeTest extends TestCase
         $this->seed();
         $cashier = User::where('email', 'cajero@tienda.test')->firstOrFail();
 
-        $this->actingAs($cashier)->get(route('cash.show', CashSession::sole()))
+        $this->actingAs($cashier)->get(route('cashier.home'))
             ->assertOk()
-            ->assertViewHas('showTotals', false)
-            ->assertViewHas('summary', fn ($v) => $v === null)
-            ->assertViewHas('sales', fn ($v) => $v->isEmpty())
-            ->assertViewHas('withdrawals', fn ($v) => $v->isEmpty())
-            ->assertViewHas('session', fn ($s) => $s->expected_cash === null
-                && $s->counted_cash === null && $s->difference === null);
+            ->assertViewMissing('summary')
+            ->assertViewMissing('session')
+            ->assertViewHas('shift', fn ($s) => $s->state === 'none' && $s->recent->isEmpty());
     }
 }

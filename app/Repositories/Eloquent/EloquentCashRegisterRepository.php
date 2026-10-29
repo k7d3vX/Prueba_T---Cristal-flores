@@ -12,4 +12,14 @@ class EloquentCashRegisterRepository implements CashRegisterRepositoryInterface
     {
         return CashRegister::query()->orderBy('id')->get();
     }
+
+    public function findOrFail(int|string $id): CashRegister
+    {
+        return CashRegister::query()->findOrFail($id);
+    }
+
+    public function setDefaultFloat(int $id, string $amount): void
+    {
+        CashRegister::query()->whereKey($id)->update(['default_float' => $amount]);
+    }
 }

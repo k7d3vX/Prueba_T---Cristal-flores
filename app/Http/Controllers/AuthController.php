@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -9,6 +10,8 @@ use Illuminate\View\View;
 
 class AuthController extends Controller
 {
+    public function __construct(private AuditLogger $audit) {}
+
     public function showLogin(): View
     {
         return view('auth.login');
@@ -27,12 +30,14 @@ class AuthController extends Controller
         }
 
         $request->session()->regenerate();
+        $this->audit->record('sesion.inicio', 'Inició sesión');
 
-        return redirect()->route('cash.index');
+        return redirect()->route('home');
     }
 
     public function logout(Request $request): RedirectResponse
     {
+        $this->audit->record('sesion.cierre', 'Cerró sesión');
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
