@@ -28,5 +28,7 @@
         <!-- Las pruebas usan SIEMPRE la BD caja_test (nunca la de desarrollo) -->
         <env name="DB_CONNECTION" value="pgsql" force="true"/>
         <env name="DB_DATABASE" value="caja_test" force="true"/>
+        <!-- También en $_SERVER: dentro de Docker DB_DATABASE=caja viene del entorno del proceso y, sin esto, ganaba sobre <env> -->
+        <server name="DB_DATABASE" value="caja_test" force="true"/>
     </php>
 </phpunit>
